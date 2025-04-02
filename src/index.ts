@@ -18,6 +18,30 @@ const server = new McpServer({
 let canvasApiToken: string | null = process.env.CANVAS_API_TOKEN || null;
 let canvasDomain: string | null = process.env.CANVAS_DOMAIN || null;
 
+// Define interfaces for API responses
+interface CanvasUser {
+  id: number;
+  name: string;
+  email: string;
+}
+
+interface CanvasCourse {
+  id: number;
+  name: string;
+  term?: {
+    name: string;
+  };
+}
+
+interface CanvasAssignment {
+  id: number;
+  name: string;
+  description: string | null;
+  due_at: string | null;
+  points_possible: number;
+  submission_types: string[];
+}
+
 // Base URL for Canvas API
 const getBaseUrl = () => {
   if (!canvasDomain) {
@@ -26,8 +50,8 @@ const getBaseUrl = () => {
   return `https://${canvasDomain}/api/v1`;
 };
 
-// Helper function for API requests
-async function canvasApiRequest(path: string, method = 'GET', body?: any) {
+// Helper function for API requests with proper typing
+async function canvasApiRequest<T>(path: string, method = 'GET', body?: any): Promise<T> {
   if (!canvasApiToken) {
     throw new Error("Canvas API token not set. Please check CANVAS_API_TOKEN environment variable.");
   }
@@ -47,11 +71,11 @@ async function canvasApiRequest(path: string, method = 'GET', body?: any) {
     throw new Error(`Canvas API error: ${response.status} - ${error}`);
   }
 
-  return response.json();
+  return response.json() as Promise<T>;
 }
 
 // Parse HTML to plain text
-function htmlToPlainText(html: string): string {
+function htmlToPlainText(html: string | null): string {
   if (!html) return '';
   const dom = new JSDOM(html);
   return dom.window.document.body.textContent || '';
@@ -70,7 +94,7 @@ function htmlToPlainText(html: string): string {
   if (canvasApiToken && canvasDomain) {
     console.error(`Environment configured correctly for domain: ${canvasDomain}`);
     try {
-      const user = await canvasApiRequest('/users/self');
+      const user = await canvasApiRequest<CanvasUser>('/users/self');
       console.error(`Successfully authenticated as ${user.name} (${user.email})`);
     } catch (error) {
       console.error(`Authentication failed: ${(error as Error).message}`);
@@ -87,7 +111,7 @@ server.tool(
   },
   async ({ state }) => {
     try {
-      const courses = await canvasApiRequest(`/courses?enrollment_state=${state}&include[]=term`);
+      const courses = await canvasApiRequest<CanvasCourse[]>(`/courses?enrollment_state=${state}&include[]=term`);
       
       if (courses.length === 0) {
         return {
@@ -98,7 +122,7 @@ server.tool(
         };
       }
 
-      const courseList = courses.map((course: any) => {
+      const courseList = courses.map((course) => {
         const termName = course.term ? `(${course.term.name})` : '';
         return `- ID: ${course.id} | ${course.name} ${termName}`;
       }).join('\n');
@@ -121,6 +145,16 @@ server.tool(
   }
 );
 
+// Extend course and assignment types for search results
+interface CourseWithAssignments extends CanvasCourse {
+  assignments: CanvasAssignment[];
+}
+
+interface AssignmentWithCourse extends CanvasAssignment {
+  courseName: string;
+  courseId: number;
+}
+
 // Search assignments tool (across courses)
 server.tool(
   "search-assignments",
@@ -133,15 +167,15 @@ server.tool(
   },
   async ({ query, dueBefore, dueAfter, includeCompleted, courseId }) => {
     try {
-      let courses;
+      let courses: CanvasCourse[];
       
       // If courseId is provided, only search that course
       if (courseId) {
-        courses = [await canvasApiRequest(`/courses/${courseId}`)];
+        courses = [await canvasApiRequest<CanvasCourse>(`/courses/${courseId}`)];
       } else {
         // Otherwise, get all courses based on state
         const courseState = includeCompleted ? 'all' : 'active';
-        courses = await canvasApiRequest(`/courses?enrollment_state=${courseState}`);
+        courses = await canvasApiRequest<CanvasCourse[]>(`/courses?enrollment_state=${courseState}`);
       }
       
       if (courses.length === 0) {
@@ -154,7 +188,7 @@ server.tool(
       }
 
       // Search assignments in each course
-      let allResults = [];
+      let allResults: AssignmentWithCourse[] = [];
       
       for (const course of courses) {
         try {
@@ -162,11 +196,11 @@ server.tool(
           if (dueAfter) url += `&bucket=due_after&due_after=${dueAfter}`;
           if (dueBefore) url += `&bucket=due_before&due_before=${dueBefore}`;
           
-          const assignments = await canvasApiRequest(url);
+          const assignments = await canvasApiRequest<CanvasAssignment[]>(url);
           
           // Filter by search term
           const searchTerms = query.toLowerCase().split(/\s+/);
-          const matchingAssignments = assignments.filter((assignment: any) => {
+          const matchingAssignments = assignments.filter((assignment) => {
             // Search in title
             const titleMatch = searchTerms.some(term => 
               assignment.name.toLowerCase().includes(term)
@@ -183,7 +217,7 @@ server.tool(
           });
           
           // Add course information to each matching assignment
-          matchingAssignments.forEach((assignment: any) => {
+          matchingAssignments.forEach((assignment) => {
             allResults.push({
               ...assignment,
               courseName: course.name,
@@ -213,7 +247,7 @@ server.tool(
         };
       }
 
-      const resultsList = allResults.map((assignment: any) => {
+      const resultsList = allResults.map((assignment) => {
         const dueDate = assignment.due_at 
           ? new Date(assignment.due_at).toLocaleString() 
           : 'No due date';
@@ -250,9 +284,9 @@ server.tool(
   },
   async ({ courseId, assignmentId, formatType }) => {
     try {
-      const assignment = await canvasApiRequest(`/courses/${courseId}/assignments/${assignmentId}`);
+      const assignment = await canvasApiRequest<CanvasAssignment>(`/courses/${courseId}/assignments/${assignmentId}`);
       
-      let description;
+      let description: string;
       switch (formatType) {
         case 'full':
           description = assignment.description || 'No description available';
@@ -273,10 +307,10 @@ server.tool(
             .replace(/<b>(.*?)<\/b>/gi, '**$1**')
             .replace(/<em>(.*?)<\/em>/gi, '*$1*')
             .replace(/<i>(.*?)<\/i>/gi, '*$1*')
-            .replace(/<ul>(.*?)<\/ul>/gis, (match) => {
+            .replace(/<ul>(.*?)<\/ul>/gis, (match: string) => {
               return match.replace(/<li>(.*?)<\/li>/gi, '- $1\n');
             })
-            .replace(/<ol>(.*?)<\/ol>/gis, (match) => {
+            .replace(/<ol>(.*?)<\/ol>/gis, (match: string) => {
               let index = 1;
               return match.replace(/<li>(.*?)<\/li>/gi, () => {
                 return `${index++}. $1\n`;
@@ -328,7 +362,7 @@ server.resource(
   new ResourceTemplate("canvas://courses/{courseId}/assignments/{assignmentId}", { list: undefined }),
   async (uri, { courseId, assignmentId }) => {
     try {
-      const assignment = await canvasApiRequest(`/courses/${courseId}/assignments/${assignmentId}`);
+      const assignment = await canvasApiRequest<CanvasAssignment>(`/courses/${courseId}/assignments/${assignmentId}`);
       
       // Format the content nicely
       const content = [
