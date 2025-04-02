@@ -230,6 +230,13 @@ function formatDate(dateStr: string | null, format: 'full' | 'date-only' = 'full
 function parseDate(dateStr: string | null): Date | null {
   if (!dateStr) return null;
   try {
+    // If the date string is just YYYY-MM-DD, treat it as local timezone
+    if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      const [year, month, day] = dateStr.split('-').map(Number);
+      const date = new Date(year, month - 1, day);
+      return isNaN(date.getTime()) ? null : date;
+    }
+    // Otherwise parse as ISO string
     const date = new Date(dateStr);
     return isNaN(date.getTime()) ? null : date;
   } catch {
@@ -247,16 +254,18 @@ function isDateInRange(date: string | null, before?: string, after?: string): bo
   if (before) {
     const beforeDate = parseDate(before);
     if (beforeDate) {
+      // Set to end of day (23:59:59.999) in local timezone
       beforeDate.setHours(23, 59, 59, 999);
-      if (dueDate > beforeDate) return false;
+      if (dueDate.getTime() > beforeDate.getTime()) return false;
     }
   }
   
   if (after) {
     const afterDate = parseDate(after);
     if (afterDate) {
+      // Set to start of day (00:00:00.000) in local timezone
       afterDate.setHours(0, 0, 0, 0);
-      if (dueDate < afterDate) return false;
+      if (dueDate.getTime() < afterDate.getTime()) return false;
     }
   }
   
@@ -343,13 +352,13 @@ server.tool(
   "search-assignments",
   "Searches for assignments across all courses based on title, description, due dates, and course filters.",
   {
-    query: z.string().describe("Search term to find in assignment titles or descriptions"),
+    query: z.string().optional().default("").describe("Search term to find in assignment titles or descriptions"),
     dueBefore: z.string().optional().describe("Only include assignments due before this date (YYYY-MM-DD)"),
     dueAfter: z.string().optional().describe("Only include assignments due after this date (YYYY-MM-DD)"),
     includeCompleted: z.boolean().default(false).describe("Include assignments from completed courses"),
     courseId: z.string().or(z.number()).optional().describe("Optional: Limit search to specific course ID"),
   },
-  async ({ query, dueBefore, dueAfter, includeCompleted, courseId }) => {
+  async ({ query = "", dueBefore, dueAfter, includeCompleted, courseId }) => {
     try {
       let courses: CanvasCourse[];
       
@@ -376,11 +385,20 @@ server.tool(
       
       for (const course of courses) {
         try {
-          // Build the assignments query with date filters
-          let assignmentsUrl = `/courses/${course.id}/assignments?per_page=100&order_by=due_at`;
+          // Build the assignments query
+          let assignmentsUrl = `/courses/${course.id}/assignments?per_page=100&order_by=due_at&include[]=submission`;
           
           // Add date filtering parameters if provided
           const params = new URLSearchParams();
+          
+          // Canvas API uses bucket parameter for broad date filtering
+          if (dueAfter && !dueBefore) {
+            params.append('bucket', 'future');
+          } else if (dueBefore && !dueAfter) {
+            params.append('bucket', 'past');
+          }
+          
+          // Add specific date range parameters
           if (dueAfter) {
             const afterDate = parseDate(dueAfter);
             if (afterDate) {
@@ -395,6 +413,7 @@ server.tool(
               params.append('due_before', beforeDate.toISOString());
             }
           }
+          
           if (params.toString()) {
             assignmentsUrl += `&${params.toString()}`;
           }
@@ -421,9 +440,14 @@ server.tool(
             }) : assignments;
           
           // Double-check date range (in case API filter wasn't exact)
-          const dateFilteredAssignments = matchingAssignments.filter(assignment => 
-            isDateInRange(assignment.due_at, dueBefore, dueAfter)
-          );
+          const dateFilteredAssignments = matchingAssignments.filter(assignment => {
+            // Skip local date filtering if the API is already handling it
+            if ((dueAfter && !dueBefore && params.has('bucket')) || 
+                (dueBefore && !dueAfter && params.has('bucket'))) {
+              return true;
+            }
+            return isDateInRange(assignment.due_at, dueBefore, dueAfter);
+          });
           
           // Add course information to each matching assignment
           dateFilteredAssignments.forEach((assignment) => {
