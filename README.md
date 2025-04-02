@@ -135,7 +135,7 @@ Keep your `CANVAS_API_TOKEN` confidential. Do not commit it to version control.
 
 ## Disclaimer
 
-This is an unofficial Canvas MCP, and is not affiliated with Canvas or Instructure.
+This is an unofficial Canvas MCP, and is not affiliated with Canvas or Instructure. I'm also not a professional software engineer, and this project was vibe-coded using Claude, so please use it at your own risk :)
 
 ## Thanks!
 
