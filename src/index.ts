@@ -81,6 +81,17 @@ function htmlToPlainText(html: string | null): string {
   return dom.window.document.body.textContent || '';
 }
 
+// Helper function to extract links from HTML
+function extractLinks(html: string | null): { text: string; href: string }[] {
+  if (!html) return [];
+  const dom = new JSDOM(html);
+  const links = dom.window.document.querySelectorAll('a');
+  return Array.from(links).map(link => ({
+    text: link.textContent || '',
+    href: link.getAttribute('href') || ''
+  }));
+}
+
 // Validate environment setup and print info
 (async function validateSetup() {
   if (!canvasApiToken) {
@@ -278,7 +289,7 @@ server.tool(
 // Get assignment details tool
 server.tool(
   "get-assignment",
-  "Retrieves detailed information about a specific assignment, including its description in various formats.",
+  "Retrieves detailed information about a specific assignment, including its description in various formats and embedded links.",
   {
     courseId: z.string().or(z.number()).describe("Course ID"),
     assignmentId: z.string().or(z.number()).describe("Assignment ID"),
@@ -290,6 +301,12 @@ server.tool(
       const assignment = await canvasApiRequest<CanvasAssignment>(`/courses/${courseId}/assignments/${assignmentId}`);
       
       let description: string;
+      let links: { text: string; href: string }[] = [];
+      
+      if (assignment.description) {
+        links = extractLinks(assignment.description);
+      }
+
       switch (formatType) {
         case 'full':
           description = assignment.description || 'No description available';
@@ -339,12 +356,20 @@ server.tool(
         `## Description`,
         ``,
         description
-      ].join('\n');
+      ];
+
+      // Add links section if any links were found
+      if (links.length > 0) {
+        details.push('', '## Required Materials and Links', '');
+        links.forEach(link => {
+          details.push(`- [${link.text}](${link.href})`);
+        });
+      }
 
       return {
         content: [{ 
           type: "text", 
-          text: details
+          text: details.join('\n')
         }]
       };
     } catch (error) {
