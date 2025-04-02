@@ -6,6 +6,10 @@ This Model Context Protocol (MCP) server lets you interact with Canvas/Instructu
 
 It allows you to retrieve, search, and summarize course and assignment information programmatically.
 
+![Search Assignments](images/search-assignments.png)
+![Assignment Details](images/assignment-details.png)
+
+
 ## Features
 
 ### Tools
