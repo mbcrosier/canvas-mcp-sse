@@ -40,6 +40,36 @@ interface CanvasAssignment {
   due_at: string | null;
   points_possible: number;
   submission_types: string[];
+  allowed_extensions: string[] | null;
+  allowed_attempts: number | null;
+  grading_type: string;
+  lock_at: string | null;
+  unlock_at: string | null;
+  has_group_assignment: boolean;
+  group_category_id: number | null;
+  peer_reviews: boolean;
+  word_count: number | null;
+  external_tool_tag_attributes?: {
+    url: string;
+    new_tab: boolean;
+  };
+  rubric: Array<{
+    id: string;
+    points: number;
+    description: string;
+    long_description: string | null;
+  }> | null;
+  use_rubric_for_grading: boolean;
+  published: boolean;
+  only_visible_to_overrides: boolean;
+  locked_for_user: boolean;
+  lock_explanation: string | null;
+  turnitin_enabled: boolean;
+  vericite_enabled: boolean;
+  submission_draft_status?: string;
+  annotatable_attachment_id?: number;
+  anonymize_students: boolean;
+  require_lockdown_browser: boolean;
 }
 
 // Base URL for Canvas API
@@ -74,11 +104,87 @@ async function canvasApiRequest<T>(path: string, method = 'GET', body?: any): Pr
   return response.json() as Promise<T>;
 }
 
-// Parse HTML to plain text
+// Parse HTML to plain text with better handling of special characters
 function htmlToPlainText(html: string | null): string {
   if (!html) return '';
   const dom = new JSDOM(html);
-  return dom.window.document.body.textContent || '';
+  // Preserve line breaks and spacing in text content
+  return dom.window.document.body.textContent?.replace(/\$(\d+)/g, '\\$$$1') || '';
+}
+
+// Helper function for safer HTML to Markdown conversion
+function convertHtmlToMarkdown(html: string): string {
+  const dom = new JSDOM(html);
+  const document = dom.window.document;
+  
+  // Helper to get text content while preserving $ signs
+  const getTextContent = (element: Element): string => {
+    return element.textContent?.replace(/\$(\d+)/g, '\\$$$1') || '';
+  };
+
+  // Process the HTML in a more structured way
+  function processNode(node: Node): string {
+    if (node.nodeType === node.TEXT_NODE) {
+      return node.textContent?.replace(/\$(\d+)/g, '\\$$$1') || '';
+    }
+
+    if (node.nodeType !== node.ELEMENT_NODE) {
+      return '';
+    }
+
+    const element = node as Element;
+    let result = '';
+
+    switch (element.tagName.toLowerCase()) {
+      case 'h1':
+        return `# ${getTextContent(element)}\n\n`;
+      case 'h2':
+        return `## ${getTextContent(element)}\n\n`;
+      case 'h3':
+        return `### ${getTextContent(element)}\n\n`;
+      case 'strong':
+      case 'b':
+        return `**${getTextContent(element)}**`;
+      case 'em':
+      case 'i':
+        return `*${getTextContent(element)}*`;
+      case 'ul':
+        return Array.from(element.children)
+          .map(li => `- ${processNode(li)}`)
+          .join('\n') + '\n\n';
+      case 'ol':
+        return Array.from(element.children)
+          .map((li, index) => `${index + 1}. ${processNode(li)}`)
+          .join('\n') + '\n\n';
+      case 'li':
+        return Array.from(element.childNodes)
+          .map(child => processNode(child))
+          .join('').trim();
+      case 'p':
+        return Array.from(element.childNodes)
+          .map(child => processNode(child))
+          .join('') + '\n\n';
+      case 'br':
+        return '\n';
+      case 'a':
+        const href = element.getAttribute('href');
+        const text = getTextContent(element);
+        return href ? `[${text}](${href})` : text;
+      default:
+        return Array.from(element.childNodes)
+          .map(child => processNode(child))
+          .join('');
+    }
+  }
+
+  // Process the body content
+  const result = Array.from(document.body.childNodes)
+    .map(node => processNode(node))
+    .join('')
+    .trim();
+
+  // Clean up any extra newlines
+  return result.replace(/\n\n\n+/g, '\n\n');
 }
 
 // Helper function to extract links from HTML
@@ -90,6 +196,64 @@ function extractLinks(html: string | null): { text: string; href: string }[] {
     text: link.textContent || '',
     href: link.getAttribute('href') || ''
   }));
+}
+
+// Helper function for date formatting and validation
+function formatDate(dateStr: string | null, format: 'full' | 'date-only' = 'full'): string {
+  if (!dateStr) return 'No date set';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return 'Invalid date';
+    
+    if (format === 'date-only') {
+      return date.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      });
+    }
+    
+    return date.toLocaleString(undefined, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short'
+    });
+  } catch (error) {
+    return 'Invalid date';
+  }
+}
+
+// Helper function to validate and parse date strings
+function parseDate(dateStr: string): Date | null {
+  try {
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) ? null : date;
+  } catch {
+    return null;
+  }
+}
+
+// Helper function to compare dates for filtering
+function isDateInRange(date: string | null, before?: string, after?: string): boolean {
+  if (!date) return true; // Include assignments with no due date
+  
+  const dueDate = parseDate(date);
+  if (!dueDate) return true; // Include if date parsing fails
+  
+  if (before) {
+    const beforeDate = parseDate(before);
+    if (beforeDate && dueDate > beforeDate) return false;
+  }
+  
+  if (after) {
+    const afterDate = parseDate(after);
+    if (afterDate && dueDate < afterDate) return false;
+  }
+  
+  return true;
 }
 
 // Validate environment setup and print info
@@ -205,26 +369,25 @@ server.tool(
       
       for (const course of courses) {
         try {
-          let url = `/courses/${course.id}/assignments?per_page=50`;
-          if (dueAfter) url += `&bucket=due_after&due_after=${dueAfter}`;
-          if (dueBefore) url += `&bucket=due_before&due_before=${dueBefore}`;
+          const assignments = await canvasApiRequest<CanvasAssignment[]>(`/courses/${course.id}/assignments`);
           
-          const assignments = await canvasApiRequest<CanvasAssignment[]>(url);
-          
-          // Filter by search term
+          // Filter by search term and dates
           const searchTerms = query.toLowerCase().split(/\s+/);
           const matchingAssignments = assignments.filter((assignment) => {
-            // Search in title
+            // Check date range first
+            if (!isDateInRange(assignment.due_at, dueBefore, dueAfter)) {
+              return false;
+            }
+            
+            // Search in title and description
             const titleMatch = searchTerms.some(term => 
               assignment.name.toLowerCase().includes(term)
             );
             
-            // Search in description (if available)
-            let descriptionMatch = false;
-            if (assignment.description) {
-              const plainText = htmlToPlainText(assignment.description).toLowerCase();
-              descriptionMatch = searchTerms.some(term => plainText.includes(term));
-            }
+            const descriptionMatch = assignment.description ? 
+              searchTerms.some(term => 
+                htmlToPlainText(assignment.description).toLowerCase().includes(term)
+              ) : false;
             
             return titleMatch || descriptionMatch;
           });
@@ -243,12 +406,17 @@ server.tool(
         }
       }
       
-      // Sort results by due date (closest first)
+      // Sort results by due date
       allResults.sort((a, b) => {
+        // Put assignments with no due date at the end
         if (!a.due_at && !b.due_at) return 0;
         if (!a.due_at) return 1;
         if (!b.due_at) return -1;
-        return new Date(a.due_at).getTime() - new Date(b.due_at).getTime();
+        
+        const dateA = parseDate(a.due_at);
+        const dateB = parseDate(b.due_at);
+        if (!dateA || !dateB) return 0;
+        return dateA.getTime() - dateB.getTime();
       });
       
       if (allResults.length === 0) {
@@ -261,11 +429,11 @@ server.tool(
       }
 
       const resultsList = allResults.map((assignment) => {
-        const dueDate = assignment.due_at 
-          ? new Date(assignment.due_at).toLocaleString() 
-          : 'No due date';
-        
-        return `- Course: ${assignment.courseName} (ID: ${assignment.courseId})\n  Assignment: ${assignment.name} (ID: ${assignment.id})\n  Due: ${dueDate}`;
+        return [
+          `- Course: ${assignment.courseName} (ID: ${assignment.courseId})`,
+          `  Assignment: ${assignment.name} (ID: ${assignment.id})`,
+          `  Due: ${formatDate(assignment.due_at)}`
+        ].join('\n');
       }).join('\n\n');
 
       return {
@@ -289,7 +457,7 @@ server.tool(
 // Get assignment details tool
 server.tool(
   "get-assignment",
-  "Retrieves detailed information about a specific assignment, including its description in various formats and embedded links.",
+  "Retrieves detailed information about a specific assignment, including its description, submission requirements, and embedded links.",
   {
     courseId: z.string().or(z.number()).describe("Course ID"),
     assignmentId: z.string().or(z.number()).describe("Assignment ID"),
@@ -316,31 +484,9 @@ server.tool(
           break;
         case 'markdown':
         default:
-          // Simple HTML to markdown conversion (not perfect but works for basic content)
-          description = assignment.description || 'No description available';
-          // Replace some HTML elements with markdown
-          description = description
-            .replace(/<h1[^>]*>(.*?)<\/h1>/gi, '# $1\n')
-            .replace(/<h2[^>]*>(.*?)<\/h2>/gi, '## $1\n')
-            .replace(/<h3[^>]*>(.*?)<\/h3>/gi, '### $1\n')
-            .replace(/<strong>(.*?)<\/strong>/gi, '**$1**')
-            .replace(/<b>(.*?)<\/b>/gi, '**$1**')
-            .replace(/<em>(.*?)<\/em>/gi, '*$1*')
-            .replace(/<i>(.*?)<\/i>/gi, '*$1*')
-            .replace(/<ul>(.*?)<\/ul>/gis, (match: string) => {
-              return match.replace(/<li>(.*?)<\/li>/gi, '- $1\n');
-            })
-            .replace(/<ol>(.*?)<\/ol>/gis, (match: string) => {
-              let index = 1;
-              return match.replace(/<li>(.*?)<\/li>/gi, () => {
-                return `${index++}. $1\n`;
-              });
-            })
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/<p[^>]*>(.*?)<\/p>/gi, '$1\n\n');
-          
-          // Finally, remove any remaining HTML tags
-          description = description.replace(/<[^>]*>/g, '');
+          description = assignment.description ? 
+            convertHtmlToMarkdown(assignment.description) : 
+            'No description available';
           break;
       }
       
@@ -349,14 +495,106 @@ server.tool(
         ``,
         `**Course ID:** ${courseId}`,
         `**Assignment ID:** ${assignment.id}`,
-        `**Due Date:** ${assignment.due_at ? new Date(assignment.due_at).toLocaleString() : 'No due date'}`,
+        `**Due Date:** ${formatDate(assignment.due_at)}`,
         `**Points Possible:** ${assignment.points_possible}`,
-        `**Submission Type:** ${assignment.submission_types?.join(', ') || 'Not specified'}`,
+        `**Status:** ${assignment.published ? 'Published' : 'Unpublished'}${assignment.only_visible_to_overrides ? ' (Only visible to specific students)' : ''}`,
+        ``,
+        `## Submission Requirements`,
+        `- **Submission Type:** ${assignment.submission_types?.join(', ') || 'Not specified'}`,
+      ];
+
+      // Add allowed file extensions if relevant
+      if (assignment.submission_types?.includes('online_upload') && assignment.allowed_extensions?.length) {
+        details.push(`- **Allowed File Types:** ${assignment.allowed_extensions.map(ext => `\`.${ext}\``).join(', ')}`);
+      }
+
+      // Add attempt limits if specified
+      if (assignment.allowed_attempts !== null && assignment.allowed_attempts !== -1) {
+        details.push(`- **Allowed Attempts:** ${assignment.allowed_attempts}`);
+      }
+
+      // Add grading type info
+      details.push(`- **Grading Type:** ${assignment.grading_type.replace(/_/g, ' ').toLowerCase()}`);
+
+      // Add time restrictions if any
+      if (assignment.unlock_at || assignment.lock_at) {
+        details.push(`- **Time Restrictions:**`);
+        if (assignment.unlock_at) {
+          details.push(`  - Available from: ${formatDate(assignment.unlock_at)}`);
+        }
+        if (assignment.lock_at) {
+          details.push(`  - Locks at: ${formatDate(assignment.lock_at)}`);
+        }
+      }
+
+      // Add group assignment info if relevant
+      if (assignment.has_group_assignment) {
+        details.push(`- **Group Assignment:** Yes`);
+      }
+
+      // Add peer review info if enabled
+      if (assignment.peer_reviews) {
+        details.push(`- **Peer Reviews Required:** Yes`);
+      }
+
+      // Add word count requirement if specified
+      if (assignment.word_count) {
+        details.push(`- **Required Word Count:** ${assignment.word_count}`);
+      }
+
+      // Add external tool info if present
+      if (assignment.external_tool_tag_attributes?.url) {
+        details.push(`- **External Tool Required:** Yes`);
+        details.push(`  - Tool URL: ${assignment.external_tool_tag_attributes.url}`);
+        if (assignment.external_tool_tag_attributes.new_tab) {
+          details.push(`  - Opens in new tab: Yes`);
+        }
+      }
+
+      // Add plagiarism detection info
+      if (assignment.turnitin_enabled || assignment.vericite_enabled) {
+        details.push(`- **Plagiarism Detection:**`);
+        if (assignment.turnitin_enabled) details.push(`  - Turnitin enabled`);
+        if (assignment.vericite_enabled) details.push(`  - VeriCite enabled`);
+      }
+
+      // Add rubric information if available
+      if (assignment.rubric && assignment.rubric.length > 0) {
+        details.push('', '## Rubric');
+        if (assignment.use_rubric_for_grading) {
+          details.push('*This rubric is used for grading*', '');
+        }
+        assignment.rubric.forEach(criterion => {
+          details.push(`### ${criterion.description} (${criterion.points} points)`);
+          if (criterion.long_description) {
+            details.push(criterion.long_description);
+          }
+          details.push('');
+        });
+      }
+
+      // Add special requirements
+      const specialReqs = [];
+      if (assignment.anonymize_students) specialReqs.push('Anonymous Grading Enabled');
+      if (assignment.require_lockdown_browser) specialReqs.push('Lockdown Browser Required');
+      if (assignment.annotatable_attachment_id) specialReqs.push('Annotation Required');
+      if (specialReqs.length > 0) {
+        details.push('', '## Special Requirements', '');
+        specialReqs.forEach(req => details.push(`- ${req}`));
+      }
+
+      // Add lock status if relevant
+      if (assignment.locked_for_user) {
+        details.push('', '## Access Restrictions', '');
+        details.push(assignment.lock_explanation || 'This assignment is currently locked.');
+      }
+
+      details.push(
         ``,
         `## Description`,
         ``,
         description
-      ];
+      );
 
       // Add links section if any links were found
       if (links.length > 0) {
