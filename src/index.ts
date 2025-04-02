@@ -226,8 +226,9 @@ function formatDate(dateStr: string | null, format: 'full' | 'date-only' = 'full
   }
 }
 
-// Helper function to validate and parse date strings
-function parseDate(dateStr: string): Date | null {
+// Helper function to parse and validate date strings
+function parseDate(dateStr: string | null): Date | null {
+  if (!dateStr) return null;
   try {
     const date = new Date(dateStr);
     return isNaN(date.getTime()) ? null : date;
@@ -236,7 +237,7 @@ function parseDate(dateStr: string): Date | null {
   }
 }
 
-// Helper function to compare dates for filtering
+// Helper function to check if a date is within a range
 function isDateInRange(date: string | null, before?: string, after?: string): boolean {
   if (!date) return true; // Include assignments with no due date
   
@@ -245,12 +246,18 @@ function isDateInRange(date: string | null, before?: string, after?: string): bo
   
   if (before) {
     const beforeDate = parseDate(before);
-    if (beforeDate && dueDate > beforeDate) return false;
+    if (beforeDate) {
+      beforeDate.setHours(23, 59, 59, 999);
+      if (dueDate > beforeDate) return false;
+    }
   }
   
   if (after) {
     const afterDate = parseDate(after);
-    if (afterDate && dueDate < afterDate) return false;
+    if (afterDate) {
+      afterDate.setHours(0, 0, 0, 0);
+      if (dueDate < afterDate) return false;
+    }
   }
   
   return true;
@@ -369,31 +376,57 @@ server.tool(
       
       for (const course of courses) {
         try {
-          const assignments = await canvasApiRequest<CanvasAssignment[]>(`/courses/${course.id}/assignments`);
+          // Build the assignments query with date filters
+          let assignmentsUrl = `/courses/${course.id}/assignments?per_page=100&order_by=due_at`;
           
-          // Filter by search term and dates
-          const searchTerms = query.toLowerCase().split(/\s+/);
-          const matchingAssignments = assignments.filter((assignment) => {
-            // Check date range first
-            if (!isDateInRange(assignment.due_at, dueBefore, dueAfter)) {
-              return false;
+          // Add date filtering parameters if provided
+          const params = new URLSearchParams();
+          if (dueAfter) {
+            const afterDate = parseDate(dueAfter);
+            if (afterDate) {
+              afterDate.setHours(0, 0, 0, 0);
+              params.append('due_after', afterDate.toISOString());
             }
-            
-            // Search in title and description
-            const titleMatch = searchTerms.some(term => 
-              assignment.name.toLowerCase().includes(term)
-            );
-            
-            const descriptionMatch = assignment.description ? 
-              searchTerms.some(term => 
-                htmlToPlainText(assignment.description).toLowerCase().includes(term)
-              ) : false;
-            
-            return titleMatch || descriptionMatch;
-          });
+          }
+          if (dueBefore) {
+            const beforeDate = parseDate(dueBefore);
+            if (beforeDate) {
+              beforeDate.setHours(23, 59, 59, 999);
+              params.append('due_before', beforeDate.toISOString());
+            }
+          }
+          if (params.toString()) {
+            assignmentsUrl += `&${params.toString()}`;
+          }
+
+          console.error(`Fetching assignments from URL: ${assignmentsUrl}`); // Debug logging
+          const assignments = await canvasApiRequest<CanvasAssignment[]>(assignmentsUrl);
+          console.error(`Found ${assignments.length} assignments in course ${course.id}`); // Debug logging
+          
+          // Filter by search terms if query is provided
+          const searchTerms = query.toLowerCase().split(/\s+/).filter(term => term.length > 0);
+          const matchingAssignments = searchTerms.length > 0 ? 
+            assignments.filter((assignment) => {
+              // Search in title and description
+              const titleMatch = searchTerms.some(term => 
+                assignment.name.toLowerCase().includes(term)
+              );
+              
+              const descriptionMatch = assignment.description ? 
+                searchTerms.some(term => 
+                  htmlToPlainText(assignment.description).toLowerCase().includes(term)
+                ) : false;
+              
+              return titleMatch || descriptionMatch;
+            }) : assignments;
+          
+          // Double-check date range (in case API filter wasn't exact)
+          const dateFilteredAssignments = matchingAssignments.filter(assignment => 
+            isDateInRange(assignment.due_at, dueBefore, dueAfter)
+          );
           
           // Add course information to each matching assignment
-          matchingAssignments.forEach((assignment) => {
+          dateFilteredAssignments.forEach((assignment) => {
             allResults.push({
               ...assignment,
               courseName: course.name,
@@ -420,26 +453,40 @@ server.tool(
       });
       
       if (allResults.length === 0) {
+        const dateRange = [];
+        if (dueAfter) dateRange.push(`after ${dueAfter}`);
+        if (dueBefore) dateRange.push(`before ${dueBefore}`);
+        const dateStr = dateRange.length > 0 ? ` due ${dateRange.join(' and ')}` : '';
+        const queryStr = query ? ` matching "${query}"` : '';
+        
         return {
           content: [{ 
             type: "text", 
-            text: `No assignments found matching "${query}".` 
+            text: `No assignments found${queryStr}${dateStr}.` 
           }]
         };
       }
 
       const resultsList = allResults.map((assignment) => {
+        const dueDate = formatDate(assignment.due_at);
+        const status = assignment.published ? '' : ' (Unpublished)';
         return [
           `- Course: ${assignment.courseName} (ID: ${assignment.courseId})`,
-          `  Assignment: ${assignment.name} (ID: ${assignment.id})`,
-          `  Due: ${formatDate(assignment.due_at)}`
+          `  Assignment: ${assignment.name}${status} (ID: ${assignment.id})`,
+          `  Due: ${dueDate}`
         ].join('\n');
       }).join('\n\n');
+
+      const dateRange = [];
+      if (dueAfter) dateRange.push(`after ${dueAfter}`);
+      if (dueBefore) dateRange.push(`before ${dueBefore}`);
+      const dateStr = dateRange.length > 0 ? ` due ${dateRange.join(' and ')}` : '';
+      const queryStr = query ? ` matching "${query}"` : '';
 
       return {
         content: [{ 
           type: "text", 
-          text: `Found ${allResults.length} assignments matching "${query}":\n\n${resultsList}` 
+          text: `Found ${allResults.length} assignments${queryStr}${dateStr}:\n\n${resultsList}` 
         }]
       };
     } catch (error) {
