@@ -105,6 +105,7 @@ function htmlToPlainText(html: string | null): string {
 // List courses tool
 server.tool(
   "list-courses",
+  "Lists all courses you are enrolled in, with options to filter by active, completed, or all courses.",
   {
     state: z.enum(['active', 'completed', 'all']).default('active')
       .describe("Filter courses by state: active, completed, or all"),
@@ -158,6 +159,7 @@ interface AssignmentWithCourse extends CanvasAssignment {
 // Search assignments tool (across courses)
 server.tool(
   "search-assignments",
+  "Searches for assignments across all courses based on title, description, due dates, and course filters.",
   {
     query: z.string().describe("Search term to find in assignment titles or descriptions"),
     dueBefore: z.string().optional().describe("Only include assignments due before this date (YYYY-MM-DD)"),
@@ -276,6 +278,7 @@ server.tool(
 // Get assignment details tool
 server.tool(
   "get-assignment",
+  "Retrieves detailed information about a specific assignment, including its description in various formats.",
   {
     courseId: z.string().or(z.number()).describe("Course ID"),
     assignmentId: z.string().or(z.number()).describe("Assignment ID"),
