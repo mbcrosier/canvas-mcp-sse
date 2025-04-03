@@ -117,9 +117,9 @@ Keep your `CANVAS_API_TOKEN` confidential. Do not commit it to version control.
 
 
 ## MCP Methods
-- **/canvas-courses**: Shows all active courses by default. Use flags to show completed or all courses
-- **/canvas-search**: Searches assignment titles and descriptions
-- **/canvas-assignment**: Retrieves full assignment details
+- **/list_courses**: Shows all active courses by default. Use flags to show completed or all courses
+- **/search_assignments**: Searches assignment titles and descriptions
+- **/get_assignment**: Retrieves full assignment details
 
 ## Troubleshooting
 

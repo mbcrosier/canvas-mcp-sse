@@ -295,7 +295,7 @@ function isDateInRange(date: string | null, before?: string, after?: string): bo
 
 // List courses tool
 server.tool(
-  "list-courses",
+  "list_courses",
   "Lists all courses you are enrolled in, with options to filter by active, completed, or all courses.",
   {
     state: z.enum(['active', 'completed', 'all']).default('active')
@@ -349,7 +349,7 @@ interface AssignmentWithCourse extends CanvasAssignment {
 
 // Search assignments tool (across courses)
 server.tool(
-  "search-assignments",
+  "search_assignments",
   "Searches for assignments across all courses based on title, description, due dates, and course filters.",
   {
     query: z.string().optional().default("").describe("Search term to find in assignment titles or descriptions"),
@@ -527,7 +527,7 @@ server.tool(
 
 // Get assignment details tool
 server.tool(
-  "get-assignment",
+  "get_assignment",
   "Retrieves detailed information about a specific assignment, including its description, submission requirements, and embedded links.",
   {
     courseId: z.string().or(z.number()).describe("Course ID"),
@@ -695,7 +695,7 @@ server.tool(
 
 // Assignment content resource
 server.resource(
-  "assignment-content",
+  "assignment_content",
   new ResourceTemplate("canvas://courses/{courseId}/assignments/{assignmentId}", { list: undefined }),
   async (uri, { courseId, assignmentId }) => {
     try {
