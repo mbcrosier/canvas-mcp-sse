@@ -116,10 +116,10 @@ Keep your `CANVAS_API_TOKEN` confidential. Do not commit it to version control.
    Or restart Cursor.
 
 
-## MCP Methods
-- **/list_courses**: Shows all active courses by default. Use flags to show completed or all courses
-- **/search_assignments**: Searches assignment titles and descriptions
-- **/get_assignment**: Retrieves full assignment details
+## MCP Tools
+- `list_courses`: Shows all active courses by default. Use flags to show completed or all courses
+- `search_assignments`: Searches assignment titles and descriptions
+- `get_assignment`: Retrieves full assignment details
 
 ## Troubleshooting
 
