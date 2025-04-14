@@ -87,7 +87,7 @@ Keep your `CANVAS_API_TOKEN` confidential. Do not commit it to version control.
      "mcpServers": {
        "canvas": {
          "command": "node", 
-         "args": ["/absolute/path/to/canvas-mcp-server/dist/index.js"], // cd into the repo, run `pwd` and enter the output here
+         "args": ["/absolute/path/to/canvas-mcp-server/dist/index.ts"], // cd into the repo, run `pwd` and enter the output here
          "env": {
             "CANVAS_API_TOKEN": "your_api_token_here",
             "CANVAS_DOMAIN": "myschool.instructure.com"
