@@ -111,7 +111,7 @@ Keep your `CANVAS_API_TOKEN` confidential. Do not commit it to version control.
 
 3. **Restart Claude Desktop / Cursor**
 
-   Open Claude Desktop and you should now see WhatsApp as an available integration.
+   Open Claude Desktop and you should now see Canvas as an available integration.
 
    Or restart Cursor.
 
