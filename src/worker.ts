@@ -8,7 +8,7 @@ import {
 } from './mcpCore.js';
 
 // Helper: Validate that the domain is a plausible Canvas domain (not IP, localhost, or empty)
-function isValidCanvasDomain(domain: string | null): boolean {
+function isValidCanvasDomain(domain: string): boolean {
   if (!domain) return false;
   // Disallow localhost, IPs, and empty
   if (/^(localhost|127\.|0\.|::1|\d+\.\d+\.\d+\.\d+)$/.test(domain)) return false;
@@ -17,15 +17,12 @@ function isValidCanvasDomain(domain: string | null): boolean {
   return true;
 }
 
-// Map endpoint to handler
-const endpointHandlers: Record<string, (params: any, token: string, domain: string) => Promise<any>> = {
-  '/list_courses': listCoursesHandler,
-  '/search_assignments': searchAssignmentsHandler,
-  '/get_assignment': getAssignmentHandler,
-  '/assignment_content': assignmentContentHandler,
-  '/manifest': async () => {
-    return mcpManifest;
-  },
+// Map tool/resource name to handler
+const toolHandlers: Record<string, (params: any, token: string, domain: string) => Promise<any>> = {
+  'list_courses': listCoursesHandler,
+  'search_assignments': searchAssignmentsHandler,
+  'get_assignment': getAssignmentHandler,
+  'assignment_content': assignmentContentHandler,
 };
 
 // Safe JSON parsing utility
@@ -40,7 +37,6 @@ async function safeJson(request: Request): Promise<any> {
 export default {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    // Accept token from Authorization header (preferred) or ?token= query param
     let token = request.headers.get('Authorization');
     if (token && token.startsWith('Bearer ')) {
       token = token.replace('Bearer ', '').trim();
@@ -55,35 +51,36 @@ export default {
     if (!isValidCanvasDomain(domain)) {
       return new Response('Missing or invalid Canvas domain', { status: 400 });
     }
-    if (request.method !== 'POST') {
-      return new Response('Method Not Allowed', { status: 405 });
-    }
-    const handler = endpointHandlers[url.pathname];
-    if (!handler) {
-      return new Response('Not found', { status: 404 });
-    }
-    // /manifest does not require POST or body
+    // /manifest endpoint for tool/resource discovery
     if (url.pathname === '/manifest') {
-      return new Response(JSON.stringify(await handler({}, '', '')), {
+      return new Response(JSON.stringify(mcpManifest), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
-    const body = await safeJson(request);
-    if (!body || typeof body !== 'object') {
-      return new Response('Invalid JSON body', { status: 400 });
+    // Only /sse endpoint is supported for tool/resource calls
+    if (url.pathname !== '/sse' || request.method !== 'POST') {
+      return new Response('Not found', { status: 404 });
     }
-    // Type checks for courseId/assignmentId if present
-    if (url.pathname === '/get_assignment' || url.pathname === '/assignment_content') {
-      if (typeof body.courseId !== 'number' && typeof body.courseId !== 'string') {
+    const body = await safeJson(request);
+    if (!body || typeof body !== 'object' || !body.tool || typeof body.tool !== 'string') {
+      return new Response('Invalid request: must include tool and params', { status: 400 });
+    }
+    const handler = toolHandlers[body.tool];
+    if (!handler) {
+      return new Response('Unknown tool/resource', { status: 400 });
+    }
+    // Type checks for courseId/assignmentId if needed
+    if ((body.tool === 'get_assignment' || body.tool === 'assignment_content')) {
+      if (!body.params || (typeof body.params.courseId !== 'number' && typeof body.params.courseId !== 'string')) {
         return new Response('Missing or invalid courseId', { status: 400 });
       }
-      if (typeof body.assignmentId !== 'number' && typeof body.assignmentId !== 'string') {
+      if (!body.params || (typeof body.params.assignmentId !== 'number' && typeof body.params.assignmentId !== 'string')) {
         return new Response('Missing or invalid assignmentId', { status: 400 });
       }
     }
     let result;
     try {
-      result = await handler(body, token, domain);
+      result = await handler(body.params, token, domain);
     } catch (err: any) {
       // Do not leak internal errors or tokens
       result = { content: [{ type: 'text', text: 'An error occurred while processing your request.' }], isError: true };

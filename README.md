@@ -20,15 +20,7 @@ It allows you to retrieve, search, and summarize course and assignment informati
 - **Description:** Retrieve a list of your Canvas courses, filtered by state.
 - **Request Body Example:**
   ```json
-  { "state": "active" } // or "completed" or "all"
-  ```
-- **Example cURL:**
-  ```sh
-  curl -N -X POST \
-    'https://<your-worker-subdomain>.workers.dev/list_courses?canvas_domain=yourdomain.instructure.com' \
-    -H 'Authorization: Bearer <your-canvas-token>' \
-    -H 'Content-Type: application/json' \
-    -d '{ "state": "active" }'
+  { "state": "active" } // or "completed" or "all" }
   ```
 - **Response Example:**
   ```json
@@ -55,14 +47,6 @@ It allows you to retrieve, search, and summarize course and assignment informati
     "courseId": 12345 // optional
   }
   ```
-- **Example cURL:**
-  ```sh
-  curl -N -X POST \
-    'https://<your-worker-subdomain>.workers.dev/search_assignments?canvas_domain=yourdomain.instructure.com' \
-    -H 'Authorization: Bearer <your-canvas-token>' \
-    -H 'Content-Type: application/json' \
-    -d '{ "query": "essay" }'
-  ```
 - **Response Example:**
   ```json
   {
@@ -86,14 +70,6 @@ It allows you to retrieve, search, and summarize course and assignment informati
     "formatType": "markdown" // or "full" or "plain"
   }
   ```
-- **Example cURL:**
-  ```sh
-  curl -N -X POST \
-    'https://<your-worker-subdomain>.workers.dev/get_assignment?canvas_domain=yourdomain.instructure.com' \
-    -H 'Authorization: Bearer <your-canvas-token>' \
-    -H 'Content-Type: application/json' \
-    -d '{ "courseId": 12345, "assignmentId": 67890 }'
-  ```
 - **Response Example:**
   ```json
   {
@@ -115,14 +91,6 @@ It allows you to retrieve, search, and summarize course and assignment informati
     "courseId": 12345,
     "assignmentId": 67890
   }
-  ```
-- **Example cURL:**
-  ```sh
-  curl -N -X POST \
-    'https://<your-worker-subdomain>.workers.dev/assignment_content?canvas_domain=yourdomain.instructure.com' \
-    -H 'Authorization: Bearer <your-canvas-token>' \
-    -H 'Content-Type: application/json' \
-    -d '{ "courseId": 12345, "assignmentId": 67890 }'
   ```
 - **Response Example:**
   ```json
@@ -164,7 +132,7 @@ You can provide your Canvas API token and domain in two ways:
 Just add your Canvas domain and token to the URL, for example:
 
 ```
-https://<your-worker-subdomain>.workers.dev/list_courses?canvas_domain=myschool.instructure.com&token=YOUR_CANVAS_TOKEN
+https://canvas-mcp-server.mbcrosier.workers.dev/sse?canvas_domain=YOUR_SCHOOL_DOMAIN&token=YOUR_CANVAS_TOKEN
 ```
 
 - This works well for integrations (like Zapier or some LLM tools) that only support URL-based configuration.
@@ -177,23 +145,40 @@ https://<your-worker-subdomain>.workers.dev/list_courses?canvas_domain=myschool.
 
 ---
 
-## Example URLs
+## Example Usage
 
-- **List Courses:**
+- **Endpoint:**
   ```
-  https://<your-worker-subdomain>.workers.dev/list_courses?canvas_domain=myschool.instructure.com&token=YOUR_CANVAS_TOKEN
+  https://canvas-mcp-server.mbcrosier.workers.dev/sse?canvas_domain=YOUR_SCHOOL_DOMAIN&token=YOUR_CANVAS_TOKEN
   ```
-- **Search Assignments:**
+- **Method:** `POST`
+- **Body:**
+  ```json
+  {
+    "tool": "list_courses",
+    "params": { "state": "active" }
+  }
   ```
-  https://<your-worker-subdomain>.workers.dev/search_assignments?canvas_domain=myschool.instructure.com&token=YOUR_CANVAS_TOKEN
+- **Other tool examples:**
+  - `"tool": "search_assignments"` with params as in the manifest
+  - `"tool": "get_assignment"` with params as in the manifest
+  - `"tool": "assignment_content"` with params as in the manifest
+
+- **Example cURL:**
+  ```sh
+  curl -N -X POST \
+    'https://canvas-mcp-server.mbcrosier.workers.dev/sse?canvas_domain=YOUR_SCHOOL_DOMAIN&token=YOUR_CANVAS_TOKEN' \
+    -H 'Content-Type: application/json' \
+    -d '{ "tool": "list_courses", "params": { "state": "active" } }'
   ```
-- **Get Assignment Details:**
+
+---
+
+## Tool Discovery
+
+- To see all available tools/resources and their parameters, GET or POST to:
   ```
-  https://<your-worker-subdomain>.workers.dev/get_assignment?canvas_domain=myschool.instructure.com&token=YOUR_CANVAS_TOKEN
-  ```
-- **Assignment Content:**
-  ```
-  https://<your-worker-subdomain>.workers.dev/assignment_content?canvas_domain=myschool.instructure.com&token=YOUR_CANVAS_TOKEN
+  https://canvas-mcp-server.mbcrosier.workers.dev/manifest
   ```
 
 ---
