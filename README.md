@@ -2,142 +2,204 @@
 
 ## Overview
 
-This Model Context Protocol (MCP) server lets you interact with Canvas/Instructure courses and assignments, without leaving your LLM (e.g. Claude Desktop).
+This Model Context Protocol (MCP) server runs as a **Cloudflare Worker** using Server-Sent Events (SSE). 
+
+It lets you interact with Canvas/Instructure courses and assignments, without leaving your LLM (e.g. Claude Desktop).
 
 It allows you to retrieve, search, and summarize course and assignment information programmatically, for example to check due dates for upcoming assignments:
 
 ![Due Dates](images/due-dates.png)
 
 
-## Features
+---
 
-### Tools
+## Available Tools
 
-1. **List Courses**
-   - Retrieve a list of courses
-   - Filter by course state (active, completed, or all)
+### 1. List Courses
+- **Endpoint:** `/list_courses`
+- **Description:** Retrieve a list of your Canvas courses, filtered by state.
+- **Request Body Example:**
+  ```json
+  { "state": "active" } // or "completed" or "all"
+  ```
+- **Example cURL:**
+  ```sh
+  curl -N -X POST \
+    'https://<your-worker-subdomain>.workers.dev/list_courses?canvas_domain=yourdomain.instructure.com' \
+    -H 'Authorization: Bearer <your-canvas-token>' \
+    -H 'Content-Type: application/json' \
+    -d '{ "state": "active" }'
+  ```
+- **Response Example:**
+  ```json
+  {
+    "content": [
+      {
+        "type": "text",
+        "text": "Your active courses:\n\n- ID: 123 | Biology 101 (Fall 2024)\n- ID: 456 | Chemistry 201 (Spring 2024)"
+      }
+    ]
+  }
+  ```
 
-2. **Search Assignments**
-   - Search across courses for assignments
-   - Filter by:
-     - Search query
-     - Due date range
-     - Specific course
-     - Include/exclude completed courses
+### 2. Search Assignments
+- **Endpoint:** `/search_assignments`
+- **Description:** Search for assignments across your courses by title, description, due date, etc.
+- **Request Body Example:**
+  ```json
+  {
+    "query": "essay",
+    "dueBefore": "2024-07-01",
+    "dueAfter": "2024-06-01",
+    "includeCompleted": false,
+    "courseId": 12345 // optional
+  }
+  ```
+- **Example cURL:**
+  ```sh
+  curl -N -X POST \
+    'https://<your-worker-subdomain>.workers.dev/search_assignments?canvas_domain=yourdomain.instructure.com' \
+    -H 'Authorization: Bearer <your-canvas-token>' \
+    -H 'Content-Type: application/json' \
+    -d '{ "query": "essay" }'
+  ```
+- **Response Example:**
+  ```json
+  {
+    "content": [
+      {
+        "type": "text",
+        "text": "Found 2 assignments matching \"essay\":\n\n- Course: Biology 101 (ID: 123)\n  Assignment: Final Essay (ID: 789)\n  Due: 6/15/2024, 11:59 PM\n\n- Course: Chemistry 201 (ID: 456)\n  Assignment: Lab Essay (ID: 1011)\n  Due: 6/20/2024, 11:59 PM"
+      }
+    ]
+  }
+  ```
 
-3. **Get Assignment Details**
-   - Fetch detailed information about a specific assignment
-   - Multiple output formats (full HTML, plain text, markdown)
+### 3. Get Assignment Details
+- **Endpoint:** `/get_assignment`
+- **Description:** Get detailed information about a specific assignment.
+- **Request Body Example:**
+  ```json
+  {
+    "courseId": 12345,
+    "assignmentId": 67890,
+    "formatType": "markdown" // or "full" or "plain"
+  }
+  ```
+- **Example cURL:**
+  ```sh
+  curl -N -X POST \
+    'https://<your-worker-subdomain>.workers.dev/get_assignment?canvas_domain=yourdomain.instructure.com' \
+    -H 'Authorization: Bearer <your-canvas-token>' \
+    -H 'Content-Type: application/json' \
+    -d '{ "courseId": 12345, "assignmentId": 67890 }'
+  ```
+- **Response Example:**
+  ```json
+  {
+    "content": [
+      {
+        "type": "text",
+        "text": "# Final Essay\n\n**Course ID:** 12345\n**Assignment ID:** 67890\n**Due Date:** 6/15/2024, 11:59 PM\n**Points Possible:** 100\n**Submission Type:** online_upload\n\n## Description\n\nWrite a 2000-word essay on genetics."
+      }
+    ]
+  }
+  ```
 
-### Resources
+### 4. Assignment Content Resource
+- **Endpoint:** `/assignment_content`
+- **Description:** Retrieve full assignment content in a standardized format.
+- **Request Body Example:**
+  ```json
+  {
+    "courseId": 12345,
+    "assignmentId": 67890
+  }
+  ```
+- **Example cURL:**
+  ```sh
+  curl -N -X POST \
+    'https://<your-worker-subdomain>.workers.dev/assignment_content?canvas_domain=yourdomain.instructure.com' \
+    -H 'Authorization: Bearer <your-canvas-token>' \
+    -H 'Content-Type: application/json' \
+    -d '{ "courseId": 12345, "assignmentId": 67890 }'
+  ```
+- **Response Example:**
+  ```json
+  {
+    "contents": [
+      {
+        "uri": "",
+        "text": "# Final Essay\n\n**Due Date:** 6/15/2024, 11:59 PM\n**Points Possible:** 100\n**Submission Type:** online_upload\n\n## Description\n\nWrite a 2000-word essay on genetics.",
+        "mimeType": "text/markdown"
+      }
+    ]
+  }
+  ```
 
-- **Assignment Content**: Retrieve full assignment details using a standardized URI format
+---
 
-## Prerequisites
+## How to Use This MCP Server 
 
-- Node.js
-- Canvas LMS account
-- Canvas API Token
-- Canvas Domain
+You can use this Canvas MCP server with tools like Claude Desktop or Cursor that support MCP integrations. Here's how to get started:
 
-## Environment Setup
+### 1. Get Your Canvas API Token
 
-Set the following environment variables:
+1. Log in to your Canvas account in your web browser.
+2. Click on your profile/account icon (usually in the top left or top right).
+3. Go to **Settings**.
+4. Scroll down to the **Approved Integrations** section.
+5. Click **New Access Token**.
+6. Give it a name (e.g., "MCP Integration") and click **Generate Token**.
+7. Copy the token that appears. **Keep this token safe!**
 
-- `CANVAS_API_TOKEN`: Your Canvas API access token (see instructions below)
-- `CANVAS_DOMAIN`: Your Canvas institution's domain (e.g., `canvas.youruniversity.edu`)
+For more details, see [Canvas's official instructions](https://community.canvaslms.com/t5/Canvas-Basics-Guide/How-do-I-manage-API-access-tokens-in-my-user-account/ta-p/615312).
 
-#### How to Get Your Canvas API Token
+### 2. Add Your Token and Canvas Domain to Your MCP Integration
 
-1. Log into Canvas
-2. Go to Account > Settings
-3. Scroll to the "Approved Integrations" section
-4. Click "New Access Token"
-5. Copy the generated token
+You can provide your Canvas API token and domain in two ways:
 
-For more details, see [these instructions from Canvas](https://community.canvaslms.com/t5/Canvas-Basics-Guide/How-do-I-manage-API-access-tokens-in-my-user-account/ta-p/615312).
+#### **A. As Query Parameters in the URL (Easy for Integrations)**
 
-### Security Note
+Just add your Canvas domain and token to the URL, for example:
 
-Keep your `CANVAS_API_TOKEN` confidential. Do not commit it to version control.
+```
+https://<your-worker-subdomain>.workers.dev/list_courses?canvas_domain=myschool.instructure.com&token=YOUR_CANVAS_TOKEN
+```
 
-## Installation
+- This works well for integrations (like Zapier or some LLM tools) that only support URL-based configuration.
+- **Security Note:** Anyone with this URL can access your Canvas data. Keep it private and do not share it.
 
-1.  **Clone the repository and install dependencies**
+#### **B. Using the Authorization Header (More Secure, Preferred)**
 
-  Clone the repository
- 
-   ```bash
-   git clone https://github.com/mbcrosier/canvas-mcp.git
-   cd canvas-mcp
-   ```
+- Pass your token in the `Authorization` header as `Bearer <token>`.
+- Pass your Canvas domain as a query parameter (`?canvas_domain=...`) or as an `X-Canvas-Domain` header.
 
-   Install dependencies. If this throws an error, make sure you have [node installed](https://nodejs.org/en).
+---
 
-   ```bash
-   npm install
-   ```
+## Example URLs
 
-2. **Connect to the MCP server**
+- **List Courses:**
+  ```
+  https://<your-worker-subdomain>.workers.dev/list_courses?canvas_domain=myschool.instructure.com&token=YOUR_CANVAS_TOKEN
+  ```
+- **Search Assignments:**
+  ```
+  https://<your-worker-subdomain>.workers.dev/search_assignments?canvas_domain=myschool.instructure.com&token=YOUR_CANVAS_TOKEN
+  ```
+- **Get Assignment Details:**
+  ```
+  https://<your-worker-subdomain>.workers.dev/get_assignment?canvas_domain=myschool.instructure.com&token=YOUR_CANVAS_TOKEN
+  ```
+- **Assignment Content:**
+  ```
+  https://<your-worker-subdomain>.workers.dev/assignment_content?canvas_domain=myschool.instructure.com&token=YOUR_CANVAS_TOKEN
+  ```
 
-   Copy the below json with the appropriate {{PATH}} values:
+---
 
-   ```json
-   {
-     "mcpServers": {
-       "canvas": {
-         "command": "node", 
-         "args": ["/absolute/path/to/canvas-mcp/src/index.ts"], // cd into the src repo, run `pwd` and enter the output here
-         "env": {
-            "CANVAS_API_TOKEN": "your_api_token_here",
-            "CANVAS_DOMAIN": "myschool.instructure.com"
-          }
-       }
-     }
-   }
-   ```
+## Notes
+- Your Canvas API token is like a password—**never share it** and keep it private.
+- If you ever need to remove access, you can delete the token from your Canvas settings.
+- If you have trouble connecting, double-check your token and domain for typos.
 
-   For **Claude**, save this as `claude_desktop_config.json` in your Claude Desktop configuration directory at:
-
-   ```
-   ~/Library/Application Support/Claude/claude_desktop_config.json
-   ```
-
-   For **Cursor**, save this as `mcp.json` in your Cursor configuration directory at:
-
-   ```
-   ~/.cursor/mcp.json
-   ```
-
-3. **Restart Claude Desktop / Cursor**
-
-   Open Claude Desktop and you should now see Canvas as an available integration.
-
-   Or restart Cursor.
-
-
-## MCP Tools
-- `list_courses`: Shows all active courses by default. Use flags to show completed or all courses
-- `search_assignments`: Searches assignment titles and descriptions
-- `get_assignment`: Retrieves full assignment details
-
-## Troubleshooting
-
-### Common Issues
-
-- **Token Invalid**: 
-  - Regenerate your Canvas API token
-  - Ensure token has appropriate permissions
-
-- **Domain Incorrect**:
-  - Double-check your Canvas institution domain
-  - Verify there are no typos
-
-## Disclaimer
-
-This is an unofficial Canvas MCP, and is not affiliated with Canvas or Instructure. I'm also not a professional software engineer, and this project was vibe-coded using Claude, so please use it at your own risk :)
-
-## Thanks!
-
-- Thanks to [Luke Harries](https://github.com/lharries) for inspiration and for part of the text of this Readme.
-- Thanks to the Anthropic team for [great instructions on how to use LLMs to create MCPs](https://modelcontextprotocol.io/tutorials/building-mcp-with-llms)!
